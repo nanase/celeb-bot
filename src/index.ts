@@ -45,7 +45,14 @@ const masto = createRestAPIClient({
     for await (const event of streaming.public.local.subscribe()) {
       switch (event.event) {
         case 'update': {
-          console.log(`${event.payload.account.username}: ${event.payload.account.statusesCount}`);
+          console.log(
+            `${event.payload.account.username}: ${event.payload.account.statusesCount} (${
+              (milestones
+                .filter((m) => m > event.payload.account.statusesCount)
+                .sort((a, b) => a - b)
+                .at(0) ?? 0) - event.payload.account.statusesCount
+            })`
+          );
           await celebrate(event.payload.account);
           break;
         }
