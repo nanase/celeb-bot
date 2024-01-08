@@ -3,6 +3,7 @@ import dayjs from 'dayjs';
 import * as dotenv from 'dotenv';
 import { createStreamingAPIClient, createRestAPIClient, mastodon } from 'masto';
 import consoleStamp from 'console-stamp';
+import { withCommas } from './lib/number.js';
 
 import { MilestoneLogger } from './milestoneLogger.js';
 
@@ -119,13 +120,4 @@ async function createStatus(status: string): Promise<mastodon.v1.Status> {
   console.log(status.replaceAll('\n', ''));
 
   return res;
-}
-
-// from: https://stackoverflow.com/a/2901298
-function withCommas(x?: number): string {
-  if (x == null) {
-    return '';
-  }
-
-  return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
