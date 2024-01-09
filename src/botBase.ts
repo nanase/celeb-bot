@@ -1,16 +1,15 @@
 import * as dotenv from 'dotenv';
-import { createStreamingAPIClient, createRestAPIClient, mastodon } from 'masto';
+import { Mastodon, type MegalodonInterface, WebSocketInterface, Entity, Response } from 'megalodon';
+
+class BotClient {
+  constructor(readonly rest: MegalodonInterface, readonly streaming: WebSocketInterface) {}
+}
 
 export abstract class BotBase {
-  protected env: dotenv.DotenvParseOutput;
-  protected streaming: mastodon.streaming.Client;
-  protected masto: mastodon.rest.Client;
-  private subscription: mastodon.streaming.Subscription | null;
-  private subscriptionNumber: number;
+  protected readonly env: dotenv.DotenvParseOutput;
+  protected readonly client: BotClient;
 
   constructor() {
-    this.subscription = null;
-    this.subscriptionNumber = -1;
     const config = dotenv.config();
 
     if (config.error) {
@@ -22,19 +21,18 @@ export abstract class BotBase {
     }
 
     this.env = config.parsed;
-    this.streaming = createStreamingAPIClient({
-      streamingApiUrl: this.env.MASTODON_STREAMING_API_URL ?? '',
-      accessToken: this.env.MASTODON_ACCESS_TOKEN ?? '',
-    });
-    this.masto = createRestAPIClient({
-      url: this.env.MASTODON_SERVER ?? '',
-      accessToken: this.env.MASTODON_ACCESS_TOKEN ?? '',
-    });
+    const client = new Mastodon(this.env.MASTODON_SERVER, this.env.MASTODON_ACCESS_TOKEN);
+    const streamingClient = new Mastodon(this.env.MASTODON_STREAMING_API_URL, this.env.MASTODON_ACCESS_TOKEN);
+    const streaming = streamingClient.localSocket();
+
+    this.client = new BotClient(client, streaming);
   }
 
-  protected abstract initialize(): Promise<void>;
-  protected abstract process(event: mastodon.streaming.Event): Promise<void>;
-  protected abstract deinitialize(): Promise<void>;
+  protected async initialize(): Promise<void> {}
+  protected async onUpdate(_event: Entity.Status): Promise<void> {}
+  protected async onReceiveNotification(_notification: Entity.Notification): Promise<void> {}
+  protected async onDelete(_id: number): Promise<void> {}
+  protected async deinitialize(): Promise<void> {}
 
   public async run() {
     await this.initialize();
@@ -43,7 +41,14 @@ export abstract class BotBase {
     let signalReceived = false;
     const tasks = () => [
       new Promise<string>(async (resolve, reject) => {
-        signal.addEventListener('abort', reject, { once: true });
+        signal.addEventListener(
+          'abort',
+          () => {
+            this.client.streaming.stop();
+            reject();
+          },
+          { once: true }
+        );
         await this.preprocess();
         resolve('botTask');
       }),
@@ -62,12 +67,11 @@ export abstract class BotBase {
         console.log('starting');
         const task = tasks();
         await Promise.race(task);
-        await this.abort();
         controller.abort();
 
         if (!signalReceived) {
-          console.log('restart after 30 seconds');
-          await new Promise((resolve) => setTimeout(resolve, 30000));
+          console.log('restart after 10 seconds');
+          await new Promise((resolve) => setTimeout(resolve, 10000));
         }
       } catch (error) {
         console.error(error);
@@ -81,32 +85,38 @@ export abstract class BotBase {
     }
   }
 
-  private async abort() {
-    if (this.subscription) {
-      this.subscription.unsubscribe();
-      console.log('socket: public local is unsubscribed');
-      this.subscription = null;
-    }
-  }
-
   private async preprocess() {
-    if (this.subscription) {
-      this.subscription.unsubscribe();
-      console.log('socket: public local is unsubscribed');
-    }
+    this.client.streaming.removeAllListeners();
 
-    const subscriptionNumber = ++this.subscriptionNumber;
-    this.subscription = this.streaming.public.local.subscribe();
-    console.log('socket: public local is subscribed');
+    return new Promise<void>((resolve) => {
+      this.client.streaming.on('connect', () => {
+        console.log('connect');
+      });
 
-    for await (const event of this.subscription) {
-      if (subscriptionNumber !== this.subscriptionNumber) {
-        break;
-      }
+      this.client.streaming.on('update', async (status: Entity.Status) => {
+        await this.onUpdate(status);
+      });
 
-      await this.process(event);
-    }
+      this.client.streaming.on('notification', async (notification: Entity.Notification) => {
+        await this.onReceiveNotification(notification);
+      });
 
-    console.log('break');
+      this.client.streaming.on('delete', async (id: number) => {
+        await this.onDelete(id);
+      });
+
+      this.client.streaming.on('error', (err: Error) => {
+        console.error(err);
+      });
+
+      this.client.streaming.on('close', () => {
+        console.log('close');
+        resolve();
+      });
+
+      this.client.streaming.on('parser-error', (err: Error) => {
+        console.error(err);
+      });
+    });
   }
 }

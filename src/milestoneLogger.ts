@@ -1,6 +1,6 @@
 import dayjs from 'dayjs';
 import fs from 'node:fs/promises';
-import { mastodon } from 'masto';
+import { Entity } from 'megalodon';
 
 interface MilestoneLoggerStorageItem {
   accountId: string;
@@ -21,7 +21,7 @@ export class MilestoneLogger {
     await fs.writeFile(path, JSON.stringify(this.#storage, null, 2));
   }
 
-  add(milestone: number, account: mastodon.v1.Account, status: mastodon.v1.Status) {
+  add(milestone: number, account: Entity.Account, status: Entity.Status | Entity.ScheduledStatus) {
     if (typeof this.#storage[milestone] === 'undefined') {
       this.#storage[milestone] = [];
     }
@@ -30,12 +30,12 @@ export class MilestoneLogger {
       accountId: account.id,
       statusId: status.id,
       username: account.username,
-      displayName: account.displayName,
+      displayName: account.display_name,
       createdAt: dayjs().unix(),
     });
   }
 
-  has(milestone: number, account: mastodon.v1.Account): boolean {
+  has(milestone: number, account: Entity.Account): boolean {
     if (typeof this.#storage[milestone] === 'undefined') {
       return false;
     }
