@@ -1,10 +1,10 @@
 import dayjs from 'dayjs';
-import * as dotenv from 'dotenv';
 import fs from 'node:fs/promises';
-import { createStreamingAPIClient, createRestAPIClient, mastodon } from 'masto';
+import { mastodon } from 'masto';
 
 import { withCommas } from './lib/number.js';
 import { MilestoneLogger } from './milestoneLogger.js';
+import { BotBase } from './botBase.js';
 
 const milestoneLoggerPath = './data/milestone_log.json';
 const milestones = [
@@ -12,40 +12,15 @@ const milestones = [
   5_000_000, 10_000_000, 20_000_000, 50_000_000, 100_000_000,
 ];
 
-export class Celebrator {
+export class Celebrator extends BotBase {
   private milestoneLogger: MilestoneLogger;
-  private env: dotenv.DotenvParseOutput;
-  private streaming: mastodon.streaming.Client;
-  private masto: mastodon.rest.Client;
-  private subscription: mastodon.streaming.Subscription | null;
-  private subscriptionNumber: number;
 
   constructor() {
+    super();
     this.milestoneLogger = new MilestoneLogger();
-    this.subscription = null;
-    this.subscriptionNumber = -1;
-    const config = dotenv.config();
-
-    if (config.error) {
-      throw config.error;
-    }
-
-    if (!config.parsed) {
-      throw new Error('.env is empty');
-    }
-
-    this.env = config.parsed;
-    this.streaming = createStreamingAPIClient({
-      streamingApiUrl: this.env.MASTODON_STREAMING_API_URL ?? '',
-      accessToken: this.env.MASTODON_ACCESS_TOKEN ?? '',
-    });
-    this.masto = createRestAPIClient({
-      url: this.env.MASTODON_SERVER ?? '',
-      accessToken: this.env.MASTODON_ACCESS_TOKEN ?? '',
-    });
   }
 
-  async initialize() {
+  protected override async initialize() {
     if (
       await fs
         .access(milestoneLoggerPath, fs.constants.F_OK)
@@ -54,55 +29,33 @@ export class Celebrator {
     ) {
       await this.milestoneLogger.load(milestoneLoggerPath);
     }
+
+    console.log('celeb_bot initialized');
   }
 
-  async loop() {
-    if (this.subscription) {
-      this.subscription.unsubscribe();
-      console.log('socket: public local is unsubscribed');
-    }
-
-    const subscriptionNumber = ++this.subscriptionNumber;
-    this.subscription = this.streaming.public.local.subscribe();
-    console.log('socket: public local is subscribed');
-
-    for await (const event of this.subscription) {
-      if (subscriptionNumber !== this.subscriptionNumber) {
+  protected override async process(event: mastodon.streaming.Event) {
+    switch (event.event) {
+      case 'update': {
+        console.log(
+          `${event.payload.account.username}: ${event.payload.account.statusesCount} (${
+            (milestones
+              .filter((m) => m > event.payload.account.statusesCount)
+              .sort((a, b) => a - b)
+              .at(0) ?? 0) - event.payload.account.statusesCount
+          })`
+        );
+        await this.celebrate(event.payload.account);
         break;
       }
-
-      switch (event.event) {
-        case 'update': {
-          console.log(
-            `${event.payload.account.username}: ${event.payload.account.statusesCount} (${
-              (milestones
-                .filter((m) => m > event.payload.account.statusesCount)
-                .sort((a, b) => a - b)
-                .at(0) ?? 0) - event.payload.account.statusesCount
-            })`
-          );
-          await this.celebrate(event.payload.account);
-          break;
-        }
-        default: {
-          break;
-        }
+      default: {
+        break;
       }
     }
-
-    console.log('break');
   }
 
-  async abort() {
-    if (this.subscription) {
-      this.subscription.unsubscribe();
-      console.log('socket: public local is unsubscribed');
-      this.subscription = null;
-    }
-  }
-
-  async deinitialize() {
+  protected override async deinitialize() {
     await this.milestoneLogger.save(milestoneLoggerPath);
+    console.log('celeb_bot deinitialized');
   }
 
   private async celebrate(account: mastodon.v1.Account): Promise<void> {
