@@ -8,6 +8,7 @@ class BotClient {
 export abstract class BotBase {
   protected readonly env: dotenv.DotenvParseOutput;
   protected readonly client: BotClient;
+  public debugger?: Console;
 
   constructor() {
     const config = dotenv.config();
@@ -45,6 +46,7 @@ export abstract class BotBase {
           'abort',
           () => {
             this.client.streaming.stop();
+            this.debugger?.debug('Streaming closed by abort');
             reject();
           },
           { once: true }
@@ -56,7 +58,7 @@ export abstract class BotBase {
         signal.addEventListener('abort', reject, { once: true });
         process.on('SIGINT', (signal) => {
           signalReceived = true;
-          console.log(`signal ${signal} received`);
+          this.debugger?.debug(`Signal ${signal} received`);
           resolve(signal);
         });
       }),
@@ -64,17 +66,16 @@ export abstract class BotBase {
 
     while (!signalReceived) {
       try {
-        console.log('starting');
         const task = tasks();
         await Promise.race(task);
         controller.abort();
 
         if (!signalReceived) {
-          console.log('restart after 10 seconds');
+          this.debugger?.warn('Restart after 10 seconds');
           await new Promise((resolve) => setTimeout(resolve, 10000));
         }
       } catch (error) {
-        console.error(error);
+        this.debugger?.error(error);
       }
     }
 
@@ -90,7 +91,7 @@ export abstract class BotBase {
 
     return new Promise<void>((resolve) => {
       this.client.streaming.on('connect', () => {
-        console.log('connect');
+        this.debugger?.debug('Connected to streaming');
       });
 
       this.client.streaming.on('update', async (status: Entity.Status) => {
@@ -106,16 +107,18 @@ export abstract class BotBase {
       });
 
       this.client.streaming.on('error', (err: Error) => {
-        console.error(err);
+        this.debugger?.error('Streaming error received!');
+        this.debugger?.error(err);
       });
 
       this.client.streaming.on('close', () => {
-        console.log('close');
+        this.debugger?.warn('Streaming closed by remote');
         resolve();
       });
 
       this.client.streaming.on('parser-error', (err: Error) => {
-        console.error(err);
+        this.debugger?.error('parser-error occurred!');
+        this.debugger?.error(err);
       });
     });
   }

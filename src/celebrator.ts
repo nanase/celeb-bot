@@ -30,7 +30,7 @@ export class Celebrator extends BotBase {
       await this.milestoneLogger.load(milestoneLoggerPath);
     }
 
-    console.log('celeb_bot initialized');
+    this.debugger?.log('celeb_bot initialized');
   }
 
   protected override async onUpdate(event: Entity.Status) {
@@ -47,7 +47,7 @@ export class Celebrator extends BotBase {
 
   protected override async deinitialize() {
     await this.milestoneLogger.save(milestoneLoggerPath);
-    console.log('celeb_bot deinitialized');
+    this.debugger?.log('celeb_bot deinitialized');
   }
 
   private async celebrate(account: Entity.Account): Promise<void> {
@@ -98,7 +98,7 @@ export class Celebrator extends BotBase {
 
   private async createStatus(status: string): Promise<Entity.Status | Entity.ScheduledStatus> {
     const res = await this.client.rest.postStatus(status, { visibility: 'public' });
-    console.log(status.replaceAll('\n', ''));
+    this.debugger?.log(`updated: ${status.replaceAll('\n', '')}`);
 
     return res.data;
   }
